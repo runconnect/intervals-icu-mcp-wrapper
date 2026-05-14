@@ -6,16 +6,5 @@ services:
     environment:
       INTERVALS_API_KEY: "${INTERVALS_API_KEY}"
       INTERVALS_ATHLETE_ID: "${INTERVALS_ATHLETE_ID}"
-    expose:
-      - "8000"
-
-  nginx:
-    image: nginx:stable-alpine
-    container_name: intervals-wrapper-nginx
-    restart: unless-stopped
-    depends_on:
-      - wrapper-sse
     ports:
-      - "80:80"
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - "8000:8000"
