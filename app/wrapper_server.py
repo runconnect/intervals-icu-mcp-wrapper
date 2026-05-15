@@ -128,4 +128,4 @@ mcp = FastApiMCP(
     ],
 )
 
-mcp.mount()
+mcp.mount_http(mount_path="/mcp")
