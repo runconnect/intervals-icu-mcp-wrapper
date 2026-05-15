@@ -20,7 +20,7 @@ async def intervals_get(path: str, params: dict | None = None):
         r = await client.get(
             url,
             params=params,
-            auth=(INTERVALS_API_KEY, "api_key"),
+            auth=("api_key", INTERVALS_API_KEY),
             headers={"Accept": "application/json"},
         )
         r.raise_for_status()
