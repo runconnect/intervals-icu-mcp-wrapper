@@ -320,12 +320,29 @@ async def get_activity_intervals(
     )
 
 
+def is_effort_usable(effort: Dict[str, Any]) -> bool:
+    keys_to_check = [
+        "name",
+        "elapsed_time",
+        "moving_time",
+        "distance",
+        "average_watts",
+        "normalized_power",
+        "average_heartrate",
+        "average_cadence",
+        "average_speed",
+        "start_index",
+        "end_index",
+    ]
+    return any(effort.get(k) is not None for k in keys_to_check)
+
+
 @app.get(
     "/best-efforts",
     operation_id="get_best_efforts",
     tags=["analysis"],
     summary="Get best efforts",
-    description="Retourne les meilleures performances d'une activité via l'API Intervals.icu, filtrées par stream et par durée ou distance.",
+    description="Retourne les meilleures performances d'une activité via l'API Intervals.icu, filtrées par stream et par durée ou distance, avec indicateurs de qualité de réponse.",
 )
 async def get_best_efforts(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
@@ -361,9 +378,15 @@ async def get_best_efforts(
 
     efforts = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
     normalized: List[Dict[str, Any]] = []
+    usable_count = 0
 
     for effort in efforts:
+        usable = is_effort_usable(effort)
+        if usable:
+            usable_count += 1
+
         item: Dict[str, Any] = {
+            "usable": usable,
             "name": effort.get("name"),
             "elapsed_time_seconds": effort.get("elapsed_time"),
             "moving_time_seconds": effort.get("moving_time"),
@@ -390,6 +413,8 @@ async def get_best_efforts(
 
         normalized.append(item)
 
+    all_null = len(normalized) > 0 and usable_count == 0
+
     return JSONResponse(
         content={
             "activity_id": activity_id,
@@ -397,6 +422,13 @@ async def get_best_efforts(
             "duration": duration,
             "distance": distance,
             "count": len(normalized),
+            "usable_count": usable_count,
+            "all_null": all_null,
+            "message": (
+                "Aucune donnée exploitable renvoyée par Intervals.icu pour cette combinaison de paramètres"
+                if all_null
+                else None
+            ),
             "best_efforts": normalized,
         }
     )
