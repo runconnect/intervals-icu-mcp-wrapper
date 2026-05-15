@@ -1,5 +1,0 @@
-fastapi
-uvicorn[standard]
-sse-starlette
-httpx
-python-dotenv
