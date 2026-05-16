@@ -1,19 +1,18 @@
-import os
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi_mcp import FastApiMCP
 
-INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
-INTERVALS_ATHLETE_ID = os.getenv("INTERVALS_ATHLETE_ID")
-INTERVALS_BASE_URL = "https://intervals.icu/api/v1"
-
-if not INTERVALS_API_KEY or not INTERVALS_ATHLETE_ID:
-    raise RuntimeError("INTERVALS_API_KEY et INTERVALS_ATHLETE_ID sont requis")
+from core.client import intervals_get, INTERVALS_ATHLETE_ID
+from core.utils import (
+    parse_date_value,
+    get_activity_date,
+    is_run_activity,
+    get_distance_meters,
+)
 
 app = FastAPI(
     title="Intervals.icu MCP HTTP Wrapper",
@@ -21,7 +20,7 @@ app = FastAPI(
     description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
 
-
+"""
 async def intervals_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     url = f"{INTERVALS_BASE_URL}{path}"
     cleaned_params = {k: v for k, v in (params or {}).items() if v is not None}
@@ -43,7 +42,7 @@ async def intervals_get(path: str, params: Optional[Dict[str, Any]] = None) -> A
         )
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Erreur réseau Intervals.icu: {str(e)}")
-
+"""
 
 async def fetch_activities_range(oldest: Optional[str], newest: Optional[str]) -> List[Dict[str, Any]]:
     data = await intervals_get(
@@ -52,7 +51,7 @@ async def fetch_activities_range(oldest: Optional[str], newest: Optional[str]) -
     )
     return data if isinstance(data, list) else []
 
-
+"""
 def parse_date_value(value: Optional[str]) -> Optional[date]:
     if not value:
         return None
@@ -90,7 +89,7 @@ def get_distance_meters(activity: Dict[str, Any]) -> float:
     if isinstance(activity.get("distanceKm"), (int, float)):
         return float(activity["distanceKm"]) * 1000.0
     return 0.0
-
+"""
 
 def resolve_plan_folder_id(items: List[Dict[str, Any]], plan_name: str) -> Optional[int]:
     for item in items:
