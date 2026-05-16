@@ -92,6 +92,15 @@ def get_distance_meters(activity: Dict[str, Any]) -> float:
     return 0.0
 
 
+def resolve_plan_folder_id(items: List[Dict[str, Any]], plan_name: str) -> Optional[int]:
+    for item in items:
+        if item.get("type") == "PLAN" and item.get("name") == plan_name:
+            plan_id = item.get("id")
+            if isinstance(plan_id, int):
+                return plan_id
+    return None
+
+
 def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Dict[str, Any]:
     bins = raw_data.get("bins", []) if isinstance(raw_data, dict) else []
     result_bins: List[Dict[str, Any]] = []
@@ -100,6 +109,7 @@ def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Di
         item: Dict[str, Any] = {
             "count": bin_item.get("count"),
         }
+
         if bin_item.get("secs") is not None:
             item["time_seconds"] = bin_item.get("secs")
 
@@ -126,6 +136,7 @@ def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Di
                 "min_pace_formatted": f"{min_minutes}:{min_seconds:02d} /km",
                 "max_pace_formatted": f"{max_minutes}:{max_seconds:02d} /km",
             }
+
         result_bins.append(item)
 
     result: Dict[str, Any] = {
@@ -133,11 +144,13 @@ def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Di
         "bins": result_bins,
         "bin_count": len(result_bins),
     }
+
     if isinstance(raw_data, dict):
         if raw_data.get("total_count") is not None:
             result["total_samples"] = raw_data.get("total_count")
         if raw_data.get("total_secs") is not None:
             result["total_time_seconds"] = raw_data.get("total_secs")
+
     return result
 
 
@@ -180,6 +193,7 @@ def normalize_best_efforts_payload(activity_id: str, data: Any) -> Dict[str, Any
         ]:
             if effort.get(src) is not None:
                 performance[dst] = effort.get(src)
+
         if performance:
             item["performance"] = performance
 
@@ -219,6 +233,7 @@ async def root():
             "/activities",
             "/wellness",
             "/events",
+            "/plan-workouts/filtered",
             "/activity-streams",
             "/activity-intervals",
             "/best-efforts",
@@ -242,89 +257,121 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     data = await fetch_activities_range(oldest, newest)
     return JSONResponse(content=data)
 
-@app.get(
-    "/plan-workouts",
-    operation_id="get_plan_workouts",
-    tags=["planning"],
-    summary="Get filtered mirrored workouts from a plan",
-)
-async def get_plan_workouts(
-    plan_name: str = Query(...),
-    plan_start: str = Query(...),
-    include_types: Optional[str] = Query(None, description="Ex: Run,Swim,VirtualRide"),
-    exclude_types: Optional[str] = Query("NOTE", description="Ex: NOTE"),
-    day_min: Optional[int] = Query(None),
-    day_max: Optional[int] = Query(None),
-):
-    try:
-        plan_start_date = date.fromisoformat(plan_start)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="plan_start invalide")
 
-    include_set = {x.strip() for x in include_types.split(",")} if include_types else None
-    exclude_set = {x.strip() for x in exclude_types.split(",")} if exclude_types else set()
-
-    folders_data = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}/folders")
-    folders = folders_data if isinstance(folders_data, list) else []
-
-    plan = next(
-        (f for f in folders if f.get("type") == "PLAN" and f.get("name") == plan_name),
+@app.get("/plan-workouts/filtered", tags=["plans"], summary="Filtre les workouts d'un plan")
+async def get_plan_workouts_filtered(
+    plan_name: str = Query(..., description="Nom logique du plan, ex: Plan_Semi"),
+    plan_start: str = Query(..., description="Date de début du plan (YYYY-MM-DD)"),
+    include_types: Optional[str] = Query(
         None,
+        description="Liste de types à inclure, séparés par des virgules, ex: Run,Swim,VirtualRide",
+    ),
+    exclude_types: Optional[str] = Query(
+        None,
+        description="Liste de types à exclure, séparés par des virgules, ex: NOTE",
+    ),
+    folder_id: Optional[int] = Query(
+        None,
+        description="ID du dossier/plan Intervals.icu. Si absent, déduit dynamiquement de plan_name",
+    ),
+    max_day: Optional[int] = Query(
+        None,
+        description="Jour max relatif au plan (optionnel, ex: 96)",
+    ),
+    return_workouts: bool = Query(
+        True,
+        description="Si false, ne renvoie que les compteurs/summary",
+    ),
+):
+    raw_items: List[Dict[str, Any]] = await intervals_get(
+        f"/athlete/{INTERVALS_ATHLETE_ID}/events",
+        params=None,
     )
-    if not plan:
-        raise HTTPException(status_code=404, detail=f"Plan '{plan_name}' introuvable")
 
-    folder_id = plan.get("id")
-    workouts_data = await intervals_get(
-        f"/athlete/{INTERVALS_ATHLETE_ID}/workouts",
-        params={"folder_id": folder_id},
-    )
-    workouts = workouts_data if isinstance(workouts_data, list) else []
+    folder = folder_id if folder_id is not None else resolve_plan_folder_id(raw_items, plan_name)
+    if folder is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Plan '{plan_name}' introuvable dans les {len(raw_items)} éléments.",
+        )
 
-    result = []
-    seen = set()
+    plan_start_date = parse_date_value(plan_start)
+    if not plan_start_date:
+        raise HTTPException(status_code=400, detail="plan_start doit être au format YYYY-MM-DD")
 
-    for w in workouts:
-        day_value = w.get("day")
-        if not isinstance(day_value, int):
-            continue
-        if day_min is not None and day_value < day_min:
-            continue
-        if day_max is not None and day_value > day_max:
-            continue
+    include_set = {t.strip() for t in include_types.split(",")} if include_types else None
+    exclude_set = {t.strip() for t in exclude_types.split(",")} if exclude_types else set()
 
-        workout_type = (w.get("type") or "").strip()
-        if include_set is not None and workout_type not in include_set:
-            continue
-        if workout_type in exclude_set:
+    normalized: List[Dict[str, Any]] = []
+    min_day = None
+    max_day_seen = None
+
+    for w in raw_items:
+        w_folder = w.get("folder_id") or w.get("folderid")
+        if w_folder != folder:
             continue
 
-        workout_date = (plan_start_date + timedelta(days=day_value)).isoformat()
-        external_id = f"{INTERVALS_ATHLETE_ID}-{folder_id}-{workout_date}-{workout_type}"
-
-        if external_id in seen:
+        day = w.get("day")
+        if day is None:
             continue
-        seen.add(external_id)
 
-        result.append({
+        if max_day is not None and isinstance(day, int) and day > max_day:
+            continue
+
+        w_type = (w.get("type") or "").strip()
+        if include_set is not None and w_type not in include_set:
+            continue
+        if w_type in exclude_set:
+            continue
+
+        if isinstance(day, int):
+            d = plan_start_date + timedelta(days=day)
+            date_str = d.isoformat()
+        else:
+            date_str = None
+
+        external_id = f"{INTERVALS_ATHLETE_ID}-{folder}-{date_str}-{w_type}"
+
+        item = {
             "athlete_id": INTERVALS_ATHLETE_ID,
-            "folderid": folder_id,
-            "day": day_value,
-            "date": workout_date,
-            "type": workout_type,
+            "folderid": folder,
+            "day": day,
+            "date": date_str,
+            "type": w_type,
             "name": w.get("name") or "",
             "description": w.get("description") or "",
             "external_id": external_id,
             "raw_json": w,
             "mirror_seen": True,
-        })
+        }
+        normalized.append(item)
 
-    return JSONResponse(content={
+        if isinstance(day, int):
+            min_day = day if min_day is None else min(min_day, day)
+            max_day_seen = day if max_day_seen is None else max(max_day_seen, day)
+
+    count_by_type: Dict[str, int] = defaultdict(int)
+    for item in normalized:
+        t = item["type"] or ""
+        count_by_type[t] += 1
+
+    response: Dict[str, Any] = {
         "plan_name": plan_name,
-        "folder_id": folder_id,
-        "count": len(result),
-        "workouts": result,
-    })
+        "folder_id": folder,
+        "plan_start": plan_start_date.isoformat(),
+        "count": len(normalized),
+        "summary": {
+            "count_by_type": dict(sorted(count_by_type.items())),
+            "min_day": min_day,
+            "max_day": max_day_seen,
+        },
+    }
+
+    if return_workouts:
+        response["workouts"] = normalized
+
+    return JSONResponse(content=response)
+
 
 @app.get(
     "/wellness",
@@ -406,6 +453,7 @@ async def get_activity_intervals(
             "id": interval.get("id"),
             "type": interval_type,
         }
+
         if interval.get("start") is not None:
             interval_item["start_seconds"] = interval.get("start")
         if interval.get("end") is not None:
@@ -425,6 +473,7 @@ async def get_activity_intervals(
         ]:
             if interval.get(src) is not None:
                 performance[dst] = interval.get(src)
+
         if performance:
             interval_item["performance"] = performance
 
@@ -440,6 +489,7 @@ async def get_activity_intervals(
             work_intervals += 1
             if isinstance(interval.get("duration"), (int, float)):
                 total_work_time += int(interval.get("duration"))
+
         if isinstance(interval_type, str) and "REST" in interval_type.upper():
             rest_intervals += 1
 
@@ -471,50 +521,7 @@ async def get_best_efforts(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
 ):
     data = await intervals_get(f"/activity/{activity_id}/best-efforts")
-
-    efforts = data if isinstance(data, list) else []
-    efforts_data: List[Dict[str, Any]] = []
-
-    for effort in efforts:
-        effort_item: Dict[str, Any] = {
-            "name": effort.get("name"),
-            "elapsed_time_seconds": effort.get("elapsed_time"),
-        }
-
-        if effort.get("moving_time") is not None:
-            effort_item["moving_time_seconds"] = effort.get("moving_time")
-        if effort.get("distance") is not None:
-            effort_item["distance_meters"] = effort.get("distance")
-
-        performance: Dict[str, Any] = {}
-        if effort.get("average_watts") is not None:
-            performance["average_watts"] = effort.get("average_watts")
-        if effort.get("normalized_power") is not None:
-            performance["normalized_power"] = effort.get("normalized_power")
-        if effort.get("average_heartrate") is not None:
-            performance["average_heartrate"] = effort.get("average_heartrate")
-        if effort.get("average_cadence") is not None:
-            performance["average_cadence"] = effort.get("average_cadence")
-        if effort.get("average_speed") is not None:
-            performance["average_speed_meters_per_sec"] = effort.get("average_speed")
-
-        if performance:
-            effort_item["performance"] = performance
-
-        if effort.get("start_index") is not None:
-            effort_item["start_index"] = effort.get("start_index")
-        if effort.get("end_index") is not None:
-            effort_item["end_index"] = effort.get("end_index")
-
-        efforts_data.append(effort_item)
-
-    return JSONResponse(
-        content={
-            "activity_id": activity_id,
-            "best_efforts": efforts_data,
-            "count": len(efforts_data),
-        }
-    )
+    return JSONResponse(content=normalize_best_efforts_payload(activity_id, data))
 
 
 @app.get(
@@ -526,18 +533,9 @@ async def get_best_efforts(
 )
 async def get_best_efforts_debug(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
-    stream: str = Query(
-        ...,
-        description="Stream requis par l'API Intervals.icu, ex: power, pace, hr",
-    ),
-    duration: Optional[int] = Query(
-        None,
-        description="Durée cible en secondes pour rechercher la meilleure performance, ex: 300 pour 5 minutes",
-    ),
-    distance: Optional[int] = Query(
-        None,
-        description="Distance cible en mètres pour rechercher la meilleure performance, ex: 5000 pour 5 km",
-    ),
+    stream: str = Query(..., description="Stream requis par l'API Intervals.icu, ex: power, pace, hr"),
+    duration: Optional[int] = Query(None, description="Durée cible en secondes pour rechercher la meilleure performance, ex: 300 pour 5 minutes"),
+    distance: Optional[int] = Query(None, description="Distance cible en mètres pour rechercher la meilleure performance, ex: 5000 pour 5 km"),
 ):
     if duration is None and distance is None:
         raise HTTPException(
@@ -551,10 +549,7 @@ async def get_best_efforts_debug(
     if distance is not None:
         params["distance"] = distance
 
-    data = await intervals_get(
-        f"/activity/{activity_id}/best-efforts",
-        params=params,
-    )
+    data = await intervals_get(f"/activity/{activity_id}/best-efforts", params=params)
 
     efforts = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
     normalized: List[Dict[str, Any]] = []
@@ -583,6 +578,7 @@ async def get_best_efforts_debug(
         ]:
             if effort.get(src) is not None:
                 performance[dst] = effort.get(src)
+
         if performance:
             item["performance"] = performance
 
@@ -684,9 +680,11 @@ async def get_running_volume_by_week(
             continue
         if not is_run_activity(activity):
             continue
+
         total_run_activities += 1
         week_start = activity_date - timedelta(days=activity_date.weekday())
         dist_m = get_distance_meters(activity)
+
         bucket = weekly[week_start.isoformat()]
         bucket["distance_meters"] += dist_m
         bucket["activity_count"] += 1
@@ -736,11 +734,11 @@ mcp = FastApiMCP(
         "get_activities",
         "get_wellness",
         "get_events",
+        "get_plan_workouts_filtered",
         "get_activity_streams",
         "get_activity_intervals",
         "get_best_efforts",
         "get_best_efforts_debug",
-        "get_plan_workouts",
         "get_power_histogram",
         "get_hr_histogram",
         "get_pace_histogram",
