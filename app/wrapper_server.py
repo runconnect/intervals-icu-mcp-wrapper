@@ -1,6 +1,14 @@
+import os
+import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
+
+# S'assurer que le répertoire contenant ce fichier (/app dans le conteneur)
+# est dans le PYTHONPATH, pour que `core` soit importable.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -12,6 +20,12 @@ from core.utils import (
     get_activity_date,
     is_run_activity,
     get_distance_meters,
+)
+
+app = FastAPI(
+    title="Intervals.icu MCP HTTP Wrapper",
+    version="1.2.1",
+    description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
 
 app = FastAPI(
