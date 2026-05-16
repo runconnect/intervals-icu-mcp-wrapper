@@ -542,7 +542,10 @@ mcp = FastApiMCP(
     description="Expose des outils Intervals.icu bruts et analytiques via MCP HTTP transport.",
     include_operations=[
         "get_activities",
+        "get_activity_details",
+        "search_activities_local",
         "get_wellness",
+        "get_wellness_for_date",
         "get_events",
         "get_plan_workouts_filtered",
         "get_activity_streams",
@@ -556,4 +559,5 @@ mcp = FastApiMCP(
     ],
 )
 
+mcp.setup_server()
 mcp.mount_http(mount_path="/mcp")
