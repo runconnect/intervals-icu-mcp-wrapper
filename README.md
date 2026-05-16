@@ -133,7 +133,7 @@ Typical flow:
 - The remote MCP client sends an API key in an HTTP header.
 - Any request without a valid key receives `401 Unauthorized`.
 
-This is especially useful when a remote Perplexity connector is configured against a public URL such as `https://mcp.runconnect.me/mcp`.
+This is especially useful when a remote Perplexity connector is configured against a public URL such as `https://your-domain.example.com/mcp`.
 
 ## Docker Compose example
 
@@ -183,7 +183,7 @@ curl -i -X POST "http://localhost:8000/mcp" \
 ### MCP initialize with API key
 
 ```bash
-curl -i -X POST "https://mcp.runconnect.me/mcp" \
+curl -i -X POST "https://your-domain.example.com/mcp" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "X-API-Key: ${MCP_API_KEY}" \
@@ -208,7 +208,7 @@ If authentication is configured correctly, the response should be `200 OK` with 
 
 Perplexity supports adding remote MCP connectors with connector-side authentication configuration. For this project, the target setup is typically: [perplexity](https://www.perplexity.ai/help-center/en/articles/13915507-adding-custom-remote-connectors)
 
-- Server URL: `https://mcp.runconnect.me/mcp`
+- Server URL: `https://your-domain.example.com/mcp`
 - Auth type: API Key
 - Header expected by the server: `X-API-Key` or, depending on the chosen strategy, `Authorization: Bearer <key>`
 - Value: the same key as `MCP_API_KEY`
