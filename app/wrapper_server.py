@@ -263,7 +263,6 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     tags=["plans"],
     summary="Filtre les workouts d'un plan",
 )
-
 async def get_plan_workouts_filtered(
     plan_name: str = Query(..., description="Nom logique du plan, ex: Plan_Semi"),
     plan_start: str = Query(..., description="Date de début du plan (YYYY-MM-DD)"),
@@ -288,17 +287,22 @@ async def get_plan_workouts_filtered(
         description="Si false, ne renvoie que les compteurs/summary",
     ),
 ):
+    folders: List[Dict[str, Any]] = await intervals_get(
+        f"/athlete/{INTERVALS_ATHLETE_ID}/folders",
+        params=None,
+    )
+
+    folder = folder_id if folder_id is not None else resolve_plan_folder_id(folders, plan_name)
+    if folder is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Plan '{plan_name}' introuvable dans les {len(folders)} éléments.",
+        )
+
     raw_items: List[Dict[str, Any]] = await intervals_get(
         f"/athlete/{INTERVALS_ATHLETE_ID}/events",
         params=None,
     )
-
-    folder = folder_id if folder_id is not None else resolve_plan_folder_id(raw_items, plan_name)
-    if folder is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Plan '{plan_name}' introuvable dans les {len(raw_items)} éléments.",
-        )
 
     plan_start_date = parse_date_value(plan_start)
     if not plan_start_date:
@@ -329,12 +333,7 @@ async def get_plan_workouts_filtered(
         if w_type in exclude_set:
             continue
 
-        if isinstance(day, int):
-            d = plan_start_date + timedelta(days=day)
-            date_str = d.isoformat()
-        else:
-            date_str = None
-
+        date_str = (plan_start_date + timedelta(days=day)).isoformat() if isinstance(day, int) else None
         external_id = f"{INTERVALS_ATHLETE_ID}-{folder}-{date_str}-{w_type}"
 
         item = {
@@ -357,8 +356,7 @@ async def get_plan_workouts_filtered(
 
     count_by_type: Dict[str, int] = defaultdict(int)
     for item in normalized:
-        t = item["type"] or ""
-        count_by_type[t] += 1
+        count_by_type[item["type"] or ""] += 1
 
     response: Dict[str, Any] = {
         "plan_name": plan_name,
