@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from typing import Any, Dict, List
 
 from fastapi import APIRouter
@@ -12,12 +13,11 @@ def _round_if_number(value: Any, digits: int = 1) -> Any:
     return round(value, digits) if isinstance(value, (int, float)) else value
 
 
-def _format_pace_seconds_per_km(value: Any) -> str | None:
-    if not isinstance(value, (int, float)) or value <= 0:
-        return None
-    minutes = int(value // 60)
-    seconds = int(value % 60)
-    return f"{minutes}:{seconds:02d} /km"
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 def build_form_analysis(tsb: Any) -> Dict[str, Any]:
@@ -108,142 +108,74 @@ def build_training_recommendations(tsb: Any, ramp_rate: Any) -> List[str]:
     return recommendations
 
 
-def normalize_athlete_profile(athlete: Dict[str, Any]) -> Dict[str, Any]:
-    profile: Dict[str, Any] = {
-        "id": athlete.get("id") or INTERVALS_ATHLETE_ID,
-        "name": athlete.get("name") or athlete.get("fullname") or "Athlete",
-    }
+def normalize_fitness_summary_from_wellness(
+    athlete_name: str,
+    wellness_record: Dict[str, Any],
+) -> Dict[str, Any]:
+    ctl = _first_not_none(
+        wellness_record.get("ctl"),
+        wellness_record.get("ctLoad"),
+        wellness_record.get("ctl_load"),
+    )
+    atl = _first_not_none(
+        wellness_record.get("atl"),
+        wellness_record.get("atlLoad"),
+        wellness_record.get("atl_load"),
+    )
+    tsb = _first_not_none(
+        wellness_record.get("tsb"),
+        wellness_record.get("form"),
+    )
+    ramp_rate = _first_not_none(
+        wellness_record.get("ramp_rate"),
+        wellness_record.get("rampRate"),
+    )
 
-    for src, dst in [
-        ("email", "email"),
-        ("sex", "sex"),
-        ("dob", "dob"),
-        ("weight", "weight_kg"),
-        ("height", "height_cm"),
-    ]:
-        if athlete.get(src) is not None:
-            profile[dst] = athlete.get(src)
-
-    fitness: Dict[str, Any] = {}
-    for src, dst in [
-        ("ctl", "ctl"),
-        ("atl", "atl"),
-        ("tsb", "tsb"),
-        ("ramp_rate", "ramp_rate"),
-    ]:
-        if athlete.get(src) is not None:
-            fitness[dst] = _round_if_number(athlete.get(src), 1)
-
-    sports: List[Dict[str, Any]] = []
-    sport_settings = athlete.get("sport_settings") or athlete.get("sports") or []
-
-    if isinstance(sport_settings, list):
-        for sport in sport_settings:
-            if not isinstance(sport, dict):
-                continue
-
-            sport_data: Dict[str, Any] = {}
-            if sport.get("type"):
-                sport_data["type"] = sport.get("type")
-            if sport.get("ftp") is not None:
-                sport_data["ftp"] = sport.get("ftp")
-            if sport.get("fthr") is not None:
-                sport_data["fthr"] = sport.get("fthr")
-            if sport.get("pace_threshold") is not None:
-                pace_threshold = sport.get("pace_threshold")
-                sport_data["pace_threshold_seconds_per_km"] = pace_threshold
-                formatted = _format_pace_seconds_per_km(pace_threshold)
-                if formatted:
-                    sport_data["pace_threshold_formatted"] = formatted
-            if sport.get("swim_threshold") is not None:
-                sport_data["swim_threshold"] = sport.get("swim_threshold")
-
-            if sport_data:
-                sports.append(sport_data)
-
-    analysis: Dict[str, Any] = {}
-    analysis.update(build_form_analysis(athlete.get("tsb")))
-    analysis.update(build_ramp_rate_analysis(athlete.get("ramp_rate")))
-
-    result: Dict[str, Any] = {
-        "profile": profile,
-        "fitness": fitness,
-    }
-
-    if sports:
-        result["sports"] = sports
-    if analysis:
-        result["analysis"] = analysis
-
-    result["raw_json"] = athlete
-    return result
-
-
-def normalize_fitness_summary(athlete: Dict[str, Any]) -> Dict[str, Any]:
     fitness_metrics: Dict[str, Any] = {}
 
-    if athlete.get("ctl") is not None:
+    if ctl is not None:
         fitness_metrics["ctl"] = {
-            "value": _round_if_number(athlete.get("ctl"), 1),
+            "value": _round_if_number(ctl, 1),
             "description": "Chronic Training Load",
             "explanation": "Charge chronique, reflet approximatif du niveau de fitness.",
         }
 
-    if athlete.get("atl") is not None:
+    if atl is not None:
         fitness_metrics["atl"] = {
-            "value": _round_if_number(athlete.get("atl"), 1),
+            "value": _round_if_number(atl, 1),
             "description": "Acute Training Load",
             "explanation": "Charge aiguë, reflet approximatif de la fatigue récente.",
         }
 
-    if athlete.get("tsb") is not None:
+    if tsb is not None:
         fitness_metrics["tsb"] = {
-            "value": _round_if_number(athlete.get("tsb"), 1),
+            "value": _round_if_number(tsb, 1),
             "description": "Training Stress Balance",
             "explanation": "Équilibre entre fitness et fatigue, souvent utilisé comme indicateur de forme.",
         }
 
-    if athlete.get("ramp_rate") is not None:
+    if ramp_rate is not None:
         fitness_metrics["ramp_rate"] = {
-            "value": _round_if_number(athlete.get("ramp_rate"), 1),
+            "value": _round_if_number(ramp_rate, 1),
             "description": "Ramp rate",
             "explanation": "Vitesse d'évolution de la charge chronique.",
         }
 
     analysis: Dict[str, Any] = {}
-    analysis.update(build_form_analysis(athlete.get("tsb")))
-    analysis.update(build_ramp_rate_analysis(athlete.get("ramp_rate")))
+    analysis.update(build_form_analysis(tsb))
+    analysis.update(build_ramp_rate_analysis(ramp_rate))
 
-    recommendations = build_training_recommendations(
-        athlete.get("tsb"),
-        athlete.get("ramp_rate"),
-    )
+    recommendations = build_training_recommendations(tsb, ramp_rate)
     if recommendations:
         analysis["recommendations"] = recommendations
 
     return {
-        "athlete_name": athlete.get("name") or athlete.get("fullname") or "Athlete",
+        "athlete_name": athlete_name,
+        "date": wellness_record.get("id") or wellness_record.get("date"),
         "fitness_metrics": fitness_metrics,
         "analysis": analysis,
-        "raw_json": athlete,
+        "raw_wellness_json": wellness_record,
     }
-
-
-@router.get(
-    "/athlete/profile",
-    operation_id="get_athlete_profile",
-    tags=["athlete"],
-    summary="Get athlete profile",
-    description="Retourne le profil athlète, les métriques de fitness actuelles et les réglages par sport.",
-)
-async def get_athlete_profile():
-    athlete = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}")
-    if not isinstance(athlete, dict):
-        return JSONResponse(
-            status_code=502,
-            content={"detail": "Réponse athlète invalide depuis Intervals.icu"},
-        )
-    return JSONResponse(content=normalize_athlete_profile(athlete))
 
 
 @router.get(
@@ -251,22 +183,48 @@ async def get_athlete_profile():
     operation_id="get_fitness_summary",
     tags=["athlete"],
     summary="Get fitness summary",
-    description="Retourne un résumé interprété des métriques CTL, ATL, TSB et ramp rate.",
+    description="Retourne un résumé interprété des métriques CTL, ATL, TSB et ramp rate à partir du dernier enregistrement wellness.",
 )
 async def get_fitness_summary():
     athlete = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}")
-    if not isinstance(athlete, dict):
+    athlete_name = "Athlete"
+    if isinstance(athlete, dict):
+        athlete_name = athlete.get("name") or athlete.get("fullname") or "Athlete"
+
+    newest = date.today()
+    oldest = newest - timedelta(days=14)
+
+    wellness = await intervals_get(
+        f"/athlete/{INTERVALS_ATHLETE_ID}/wellness",
+        params={
+            "oldest": oldest.isoformat(),
+            "newest": newest.isoformat(),
+        },
+    )
+
+    wellness_records = wellness if isinstance(wellness, list) else []
+    if not wellness_records:
         return JSONResponse(
-            status_code=502,
-            content={"detail": "Réponse athlète invalide depuis Intervals.icu"},
+            status_code=404,
+            content={"detail": "Aucune donnée wellness disponible sur la période récente."},
         )
 
-    if athlete.get("ctl") is None and athlete.get("atl") is None and athlete.get("tsb") is None:
+    wellness_records.sort(
+        key=lambda x: str(x.get("id") or x.get("date") or ""),
+        reverse=True,
+    )
+
+    latest = wellness_records[0]
+    result = normalize_fitness_summary_from_wellness(athlete_name, latest)
+
+    if not result.get("fitness_metrics"):
         return JSONResponse(
             status_code=404,
             content={
-                "detail": "Aucune donnée de fitness disponible pour cet athlète."
+                "detail": "Aucune métrique CTL/ATL/TSB exploitable trouvée dans le dernier enregistrement wellness.",
+                "latest_wellness_date": latest.get("id") or latest.get("date"),
+                "raw_wellness_json": latest,
             },
         )
 
-    return JSONResponse(content=normalize_fitness_summary(athlete))
+    return JSONResponse(content=result)
