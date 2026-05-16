@@ -300,8 +300,8 @@ async def get_plan_workouts_filtered(
         )
 
     raw_items: List[Dict[str, Any]] = await intervals_get(
-        f"/athlete/{INTERVALS_ATHLETE_ID}/events",
-        params=None,
+        f"/athlete/{INTERVALS_ATHLETE_ID}/workouts",
+        params={"folder_id": folder},
     )
 
     plan_start_date = parse_date_value(plan_start)
@@ -333,7 +333,7 @@ async def get_plan_workouts_filtered(
         if w_type in exclude_set:
             continue
 
-        date_str = (plan_start_date + timedelta(days=day)).isoformat() if isinstance(day, int) else None
+        date_str = (plan_start_date + timedelta(days=day)).isoformat()
         external_id = f"{INTERVALS_ATHLETE_ID}-{folder}-{date_str}-{w_type}"
 
         item = {
@@ -350,9 +350,8 @@ async def get_plan_workouts_filtered(
         }
         normalized.append(item)
 
-        if isinstance(day, int):
-            min_day = day if min_day is None else min(min_day, day)
-            max_day_seen = day if max_day_seen is None else max(max_day_seen, day)
+        min_day = day if min_day is None else min(min_day, day)
+        max_day_seen = day if max_day_seen is None else max(max_day_seen, day)
 
     count_by_type: Dict[str, int] = defaultdict(int)
     for item in normalized:
