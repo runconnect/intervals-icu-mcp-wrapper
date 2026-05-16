@@ -304,6 +304,28 @@ async def get_plan_workouts_filtered(
         params={"folder_id": folder},
     )
     
+    """
+    raw_count = len(raw_items) if isinstance(raw_items, list) else None
+    same_folder = sum(
+        1 for w in raw_items
+        if (w.get("folder_id") or w.get("folderid")) == folder
+    ) if isinstance(raw_items, list) else None
+    with_day = sum(
+        1 for w in raw_items
+        if w.get("day") is not None
+    ) if isinstance(raw_items, list) else None
+
+    return {
+        "athlete_id": INTERVALS_ATHLETE_ID,
+        "plan_name": plan_name,
+        "folder_id": folder,
+        "raw_count": raw_count,
+        "same_folder_count": same_folder,
+        "with_day_count": with_day,
+        "first_items": raw_items[:3] if isinstance(raw_items, list) else raw_items,
+    }
+    """
+    
     plan_start_date = parse_date_value(plan_start)
     if not plan_start_date:
         raise HTTPException(status_code=400, detail="plan_start doit être au format YYYY-MM-DD")
