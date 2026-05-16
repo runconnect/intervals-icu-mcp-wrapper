@@ -17,7 +17,7 @@ if not INTERVALS_API_KEY or not INTERVALS_ATHLETE_ID:
 
 app = FastAPI(
     title="Intervals.icu MCP HTTP Wrapper",
-    version="1.2.0",
+    version="1.2.1",
     description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
 
@@ -141,6 +141,62 @@ def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Di
     return result
 
 
+def is_effort_usable(effort: Dict[str, Any]) -> bool:
+    keys_to_check = [
+        "name",
+        "elapsed_time",
+        "moving_time",
+        "distance",
+        "average_watts",
+        "normalized_power",
+        "average_heartrate",
+        "average_cadence",
+        "average_speed",
+        "start_index",
+        "end_index",
+    ]
+    return any(effort.get(k) is not None for k in keys_to_check)
+
+
+def normalize_best_efforts_payload(activity_id: str, data: Any) -> Dict[str, Any]:
+    efforts = data if isinstance(data, list) else []
+    normalized: List[Dict[str, Any]] = []
+
+    for effort in efforts:
+        item: Dict[str, Any] = {
+            "name": effort.get("name"),
+            "elapsed_time_seconds": effort.get("elapsed_time"),
+            "moving_time_seconds": effort.get("moving_time"),
+            "distance_meters": effort.get("distance"),
+        }
+
+        performance: Dict[str, Any] = {}
+        for src, dst in [
+            ("average_watts", "average_watts"),
+            ("normalized_power", "normalized_power"),
+            ("average_heartrate", "average_heartrate"),
+            ("average_cadence", "average_cadence"),
+            ("average_speed", "average_speed_meters_per_sec"),
+        ]:
+            if effort.get(src) is not None:
+                performance[dst] = effort.get(src)
+        if performance:
+            item["performance"] = performance
+
+        if effort.get("start_index") is not None:
+            item["start_index"] = effort.get("start_index")
+        if effort.get("end_index") is not None:
+            item["end_index"] = effort.get("end_index")
+
+        normalized.append(item)
+
+    return {
+        "activity_id": activity_id,
+        "count": len(normalized),
+        "best_efforts": normalized,
+    }
+
+
 @app.get("/health", operation_id="health_check", tags=["system"], summary="Health check")
 async def health():
     return {
@@ -148,7 +204,7 @@ async def health():
         "service": "intervals-icu-mcp-http-wrapper",
         "mcp_endpoint": "/mcp",
         "athlete_id": INTERVALS_ATHLETE_ID,
-        "version": "1.2.0",
+        "version": "1.2.1",
     }
 
 
@@ -166,6 +222,7 @@ async def root():
             "/activity-streams",
             "/activity-intervals",
             "/best-efforts",
+            "/best-efforts-debug",
             "/power-histogram",
             "/hr-histogram",
             "/pace-histogram",
@@ -320,31 +377,71 @@ async def get_activity_intervals(
     )
 
 
-def is_effort_usable(effort: Dict[str, Any]) -> bool:
-    keys_to_check = [
-        "name",
-        "elapsed_time",
-        "moving_time",
-        "distance",
-        "average_watts",
-        "normalized_power",
-        "average_heartrate",
-        "average_cadence",
-        "average_speed",
-        "start_index",
-        "end_index",
-    ]
-    return any(effort.get(k) is not None for k in keys_to_check)
-
-
 @app.get(
     "/best-efforts",
     operation_id="get_best_efforts",
     tags=["analysis"],
     summary="Get best efforts",
-    description="Retourne les meilleures performances d'une activité via l'API Intervals.icu, filtrées par stream et par durée ou distance, avec indicateurs de qualité de réponse.",
+    description="Retourne les meilleures performances d'une activité avec une interface alignée sur activity_analysis.py.",
 )
 async def get_best_efforts(
+    activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
+):
+    data = await intervals_get(f"/activity/{activity_id}/best-efforts")
+
+    efforts = data if isinstance(data, list) else []
+    efforts_data: List[Dict[str, Any]] = []
+
+    for effort in efforts:
+        effort_item: Dict[str, Any] = {
+            "name": effort.get("name"),
+            "elapsed_time_seconds": effort.get("elapsed_time"),
+        }
+
+        if effort.get("moving_time") is not None:
+            effort_item["moving_time_seconds"] = effort.get("moving_time")
+        if effort.get("distance") is not None:
+            effort_item["distance_meters"] = effort.get("distance")
+
+        performance: Dict[str, Any] = {}
+        if effort.get("average_watts") is not None:
+            performance["average_watts"] = effort.get("average_watts")
+        if effort.get("normalized_power") is not None:
+            performance["normalized_power"] = effort.get("normalized_power")
+        if effort.get("average_heartrate") is not None:
+            performance["average_heartrate"] = effort.get("average_heartrate")
+        if effort.get("average_cadence") is not None:
+            performance["average_cadence"] = effort.get("average_cadence")
+        if effort.get("average_speed") is not None:
+            performance["average_speed_meters_per_sec"] = effort.get("average_speed")
+
+        if performance:
+            effort_item["performance"] = performance
+
+        if effort.get("start_index") is not None:
+            effort_item["start_index"] = effort.get("start_index")
+        if effort.get("end_index") is not None:
+            effort_item["end_index"] = effort.get("end_index")
+
+        efforts_data.append(effort_item)
+
+    return JSONResponse(
+        content={
+            "activity_id": activity_id,
+            "best_efforts": efforts_data,
+            "count": len(efforts_data),
+        }
+    )
+
+
+@app.get(
+    "/best-efforts-debug",
+    operation_id="get_best_efforts_debug",
+    tags=["analysis"],
+    summary="Debug best efforts",
+    description="Endpoint de diagnostic pour l'API Intervals.icu avec paramètres stream, duration et distance, et indicateurs de qualité de réponse.",
+)
+async def get_best_efforts_debug(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
     stream: str = Query(
         ...,
@@ -559,6 +656,7 @@ mcp = FastApiMCP(
         "get_activity_streams",
         "get_activity_intervals",
         "get_best_efforts",
+        "get_best_efforts_debug",
         "get_power_histogram",
         "get_hr_histogram",
         "get_pace_histogram",
