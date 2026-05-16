@@ -243,83 +243,88 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     return JSONResponse(content=data)
 
 @app.get(
-    "/plan-workouts-mirror",
-    operation_id="get_plan_workouts_mirror",
+    "/plan-workouts",
+    operation_id="get_plan_workouts",
     tags=["planning"],
-    summary="Get mirrored workouts from a plan",
-    description="Recherche un plan par son nom dans les folders Intervals.icu, récupère ses séances, puis applique une transformation miroir avec date calculée, external_id, raw_json et mirror_seen.",
+    summary="Get filtered mirrored workouts from a plan",
 )
-async def get_plan_workouts_mirror(
-    plan_name: str = Query(..., description="Nom exact du plan Intervals.icu, ex: Plan_Semi"),
-    plan_start: str = Query(..., description="Date de départ du plan au format YYYY-MM-DD, ex: 2026-02-02"),
+async def get_plan_workouts(
+    plan_name: str = Query(...),
+    plan_start: str = Query(...),
+    include_types: Optional[str] = Query(None, description="Ex: Run,Swim,VirtualRide"),
+    exclude_types: Optional[str] = Query("NOTE", description="Ex: NOTE"),
+    day_min: Optional[int] = Query(None),
+    day_max: Optional[int] = Query(None),
 ):
     try:
         plan_start_date = date.fromisoformat(plan_start)
     except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="plan_start doit être une date ISO valide au format YYYY-MM-DD",
-        )
+        raise HTTPException(status_code=400, detail="plan_start invalide")
+
+    include_set = {x.strip() for x in include_types.split(",")} if include_types else None
+    exclude_set = {x.strip() for x in exclude_types.split(",")} if exclude_types else set()
 
     folders_data = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}/folders")
     folders = folders_data if isinstance(folders_data, list) else []
 
-    matching_plan = None
-    for item in folders:
-        if item.get("type") == "PLAN" and item.get("name") == plan_name:
-            matching_plan = item
-            break
+    plan = next(
+        (f for f in folders if f.get("type") == "PLAN" and f.get("name") == plan_name),
+        None,
+    )
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Plan '{plan_name}' introuvable")
 
-    if not matching_plan:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Plan '{plan_name}' introuvable dans les folders Intervals.icu",
-        )
-
-    folder_id = matching_plan.get("id")
-
+    folder_id = plan.get("id")
     workouts_data = await intervals_get(
         f"/athlete/{INTERVALS_ATHLETE_ID}/workouts",
         params={"folder_id": folder_id},
     )
     workouts = workouts_data if isinstance(workouts_data, list) else []
 
-    mirrored_workouts: List[Dict[str, Any]] = []
+    result = []
+    seen = set()
 
-    for workout in workouts:
-        day_value = workout.get("day")
+    for w in workouts:
+        day_value = w.get("day")
         if not isinstance(day_value, int):
             continue
+        if day_min is not None and day_value < day_min:
+            continue
+        if day_max is not None and day_value > day_max:
+            continue
 
-        workout_date = plan_start_date + timedelta(days=day_value)
-        workout_date_str = workout_date.isoformat()
-        workout_type = workout.get("type") or ""
-        external_id = f"{INTERVALS_ATHLETE_ID}-{folder_id}-{workout_date_str}-{workout_type}"
+        workout_type = (w.get("type") or "").strip()
+        if include_set is not None and workout_type not in include_set:
+            continue
+        if workout_type in exclude_set:
+            continue
 
-        mirrored_workouts.append(
-            {
-                "athlete_id": INTERVALS_ATHLETE_ID,
-                "folderid": folder_id,
-                "day": day_value,
-                "date": workout_date_str,
-                "type": workout_type,
-                "name": workout.get("name") or "",
-                "description": workout.get("description") or "",
-                "external_id": external_id,
-                "raw_json": workout,
-                "mirror_seen": True,
-            }
-        )
+        workout_date = (plan_start_date + timedelta(days=day_value)).isoformat()
+        external_id = f"{INTERVALS_ATHLETE_ID}-{folder_id}-{workout_date}-{workout_type}"
 
-    return JSONResponse(
-        content={
-            "plan_name": plan_name,
-            "plan_start": plan_start,
-            "folder_id": folder_id,
-            "count": len(mirrored_workouts),
-            "workouts": mirrored_workouts,
-        }
-    )
+        if external_id in seen:
+            continue
+        seen.add(external_id)
+
+        result.append({
+            "athlete_id": INTERVALS_ATHLETE_ID,
+            "folderid": folder_id,
+            "day": day_value,
+            "date": workout_date,
+            "type": workout_type,
+            "name": w.get("name") or "",
+            "description": w.get("description") or "",
+            "external_id": external_id,
+            "raw_json": w,
+            "mirror_seen": True,
+        })
+
+    return JSONResponse(content={
+        "plan_name": plan_name,
+        "folder_id": folder_id,
+        "count": len(result),
+        "workouts": result,
+    })
 
 @app.get(
     "/wellness",
@@ -735,7 +740,7 @@ mcp = FastApiMCP(
         "get_activity_intervals",
         "get_best_efforts",
         "get_best_efforts_debug",
-        "get_plan_workouts_mirror",
+        "get_plan_workouts",
         "get_power_histogram",
         "get_hr_histogram",
         "get_pace_histogram",
