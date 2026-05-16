@@ -49,16 +49,20 @@ async def api_key_middleware(request: Request, call_next):
                 },
             )
 
-        provided_key = request.headers.get("X-API-Key")
-        if provided_key != MCP_API_KEY:
+        provided_key = request.headers.get("x-api-key")
+
+        auth_header = request.headers.get("authorization")
+        bearer_key = None
+        if auth_header and auth_header.startswith("Bearer "):
+            bearer_key = auth_header[len("Bearer "):]
+
+        if provided_key != MCP_API_KEY and bearer_key != MCP_API_KEY:
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Clé API manquante ou invalide."},
             )
 
-    response = await call_next(request)
-    return response
-
+    return await call_next(request)
 
 app.include_router(athlete_router)
 app.include_router(plans_router)
