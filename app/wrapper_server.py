@@ -4,35 +4,61 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
+from fastapi_mcp import FastApiMCP
+
 # S'assurer que le répertoire contenant ce fichier (/app dans le conteneur)
 # est dans le PYTHONPATH, pour que `core` soit importable.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
-from fastapi_mcp import FastApiMCP
-
-from core.client import intervals_get, INTERVALS_ATHLETE_ID
+from core.client import INTERVALS_ATHLETE_ID, intervals_get
 from core.utils import (
-    parse_date_value,
     get_activity_date,
-    is_run_activity,
     get_distance_meters,
+    is_run_activity,
+    parse_date_value,
 )
 
-# import tools in wrapper_server.py
+from routes.activities import router as activities_router
 from routes.athlete import router as athlete_router
 from routes.plans import router as plans_router
 from routes.wellness import router as wellness_router
-from routes.activities import router as activities_router
+
+MCP_API_KEY = os.getenv("MCP_API_KEY")
+PUBLIC_PATHS = {"/", "/health"}
 
 app = FastAPI(
     title="Intervals.icu MCP HTTP Wrapper",
     version="1.2.1",
     description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    path = request.url.path
+
+    if path not in PUBLIC_PATHS:
+        if not MCP_API_KEY:
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={
+                    "detail": "La variable d'environnement MCP_API_KEY n'est pas configurée."
+                },
+            )
+
+        provided_key = request.headers.get("X-API-Key")
+        if provided_key != MCP_API_KEY:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Clé API manquante ou invalide."},
+            )
+
+    response = await call_next(request)
+    return response
+
 
 app.include_router(athlete_router)
 app.include_router(plans_router)
