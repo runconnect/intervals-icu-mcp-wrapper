@@ -303,7 +303,7 @@ async def get_plan_workouts_filtered(
         f"/athlete/{INTERVALS_ATHLETE_ID}/workouts",
         params={"folder_id": folder},
     )
-
+    
     plan_start_date = parse_date_value(plan_start)
     if not plan_start_date:
         raise HTTPException(status_code=400, detail="plan_start doit être au format YYYY-MM-DD")
