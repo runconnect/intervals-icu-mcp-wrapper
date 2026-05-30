@@ -26,6 +26,7 @@ from routes.activities import router as activities_router
 from routes.athlete import router as athlete_router
 from routes.plans import router as plans_router
 from routes.wellness import router as wellness_router
+from routes.events import router as events_router
 
 MCP_API_KEY = os.getenv("MCP_API_KEY")
 PUBLIC_PATHS = {"/", "/health"}
@@ -68,6 +69,7 @@ app.include_router(athlete_router)
 app.include_router(plans_router)
 app.include_router(wellness_router)
 app.include_router(activities_router)
+app.include_router(events_router)
 
 """
 """
@@ -591,6 +593,12 @@ mcp = FastApiMCP(
         "get_hr_histogram",
         "get_pace_histogram",
         "get_running_volume_by_week",
+        "create_event",
+        "update_event",
+        "delete_event",
+        "bulk_create_events",
+        "bulk_delete_events",
+        "duplicate_event",
     ],
 )
 
