@@ -11,27 +11,52 @@ INTERVALS_BASE_URL = "https://intervals.icu/api/v1"
 if not INTERVALS_API_KEY or not INTERVALS_ATHLETE_ID:
     raise RuntimeError("INTERVALS_API_KEY et INTERVALS_ATHLETE_ID sont requis")
 
+
+# ---------------------------------------------------------------------------
+# Helpers privés
+# ---------------------------------------------------------------------------
+
+def _auth() -> tuple:
+    return ("API_KEY", INTERVALS_API_KEY)
+
+
+def _clean(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    return {k: v for k, v in (params or {}).items() if v is not None}
+
+
+def _raise(e: httpx.HTTPStatusError) -> None:
+    detail = e.response.text if e.response is not None else str(e)
+    raise HTTPException(
+        status_code=e.response.status_code if e.response is not None else 502,
+        detail=f"Erreur Intervals.icu: {detail}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET
+# ---------------------------------------------------------------------------
+
 async def intervals_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     url = f"{INTERVALS_BASE_URL}{path}"
-    cleaned_params = {k: v for k, v in (params or {}).items() if v is not None}
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(
                 url,
-                params=cleaned_params,
-                auth=("API_KEY", INTERVALS_API_KEY),
+                params=_clean(params),
+                auth=_auth(),
                 headers={"Accept": "application/json"},
             )
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as e:
-        detail = e.response.text if e.response is not None else str(e)
-        raise HTTPException(
-            status_code=e.response.status_code if e.response is not None else 502,
-            detail=f"Erreur Intervals.icu: {detail}",
-        )
+        _raise(e)
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Erreur réseau Intervals.icu: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# POST
+# ---------------------------------------------------------------------------
 
 async def intervals_post(
     path: str,
@@ -55,6 +80,11 @@ async def intervals_post(
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Erreur réseau Intervals.icu: {str(e)}")
 
+
+# ---------------------------------------------------------------------------
+# PUT
+# ---------------------------------------------------------------------------
+
 async def intervals_put(
     path: str,
     json: Optional[Union[Dict[str, Any], List[Any]]] = None,
@@ -77,6 +107,10 @@ async def intervals_put(
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Erreur réseau Intervals.icu: {str(e)}")
 
+
+# ---------------------------------------------------------------------------
+# DELETE
+# ---------------------------------------------------------------------------
 
 async def intervals_delete(
     path: str,
