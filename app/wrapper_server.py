@@ -578,6 +578,7 @@ mcp = FastApiMCP(
         "get_activities",
         "get_activity_details",
         "search_activities_local",
+        "search_activities_full",
         "get_wellness",
         "get_wellness_for_date",
         "get_events",

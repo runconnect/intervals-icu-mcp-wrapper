@@ -237,6 +237,37 @@ async def search_activities_local(
         }
     )
 
+@router.get(
+    "/activities/search/full",
+    operation_id="search_activities_full",
+    tags=["intervals"],
+    summary="Search activities with full details",
+    description="Recherche des activités par nom ou tag, retourne les détails complets (métriques de performance, charge, intensité).",
+)
+async def search_activities_full(
+    query: str = Query(..., description="Texte recherché dans name, description ou tag"),
+    limit: int = Query(30, description="Nombre maximum de résultats (max 100)"),
+):
+    query_norm = query.strip()
+    if not query_norm:
+        raise HTTPException(status_code=400, detail="query ne doit pas être vide")
+
+    # Appel à l'API native de recherche Intervals.icu
+    data = await intervals_get(
+        f"/athlete/{INTERVALS_ATHLETE_ID}/activities",
+        params={"search": query_norm, "limit": min(limit, 100)},
+    )
+    activities = data if isinstance(data, list) else []
+
+    # Normalisation enrichie (détails complets)
+    normalized = [normalize_activity_details(a) for a in activities]
+    normalized.sort(key=lambda x: str(x.get("start_date") or ""), reverse=True)
+
+    return JSONResponse(content={
+        "query": query,
+        "count": len(normalized),
+        "activities": normalized,
+    })
 
 @router.get(
     "/events",
