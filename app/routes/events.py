@@ -71,13 +71,17 @@ def _normalize_event(event: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 def _validate_date(date_str: str, field: str = "start_date_local") -> None:
-    try:
-        datetime.strptime(date_str, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Format de date invalide pour '{field}'. Utiliser YYYY-MM-DD.",
-        )
+    accepted_formats = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S")
+    for fmt in accepted_formats:
+        try:
+            datetime.strptime(date_str, fmt)
+            return
+        except ValueError:
+            pass
+    raise HTTPException(
+        status_code=400,
+        detail=f"Format de date invalide pour '{field}'. Utiliser YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SS.",
+    )
 
 def _validate_category(category: str) -> str:
     cat = category.upper()
