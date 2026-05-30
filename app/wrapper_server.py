@@ -235,20 +235,6 @@ async def root():
 async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = None):
     data = await fetch_activities_range(oldest, newest)
     return JSONResponse(content=data)
-
-@app.get(
-    "/events",
-    operation_id="get_events",
-    tags=["intervals"],
-    summary="Get calendar events",
-    description="Retourne les événements calendrier Intervals.icu sur une plage de dates ISO optional oldest/newest.",
-)
-async def get_events(oldest: Optional[str] = None, newest: Optional[str] = None):
-    data = await intervals_get(
-        f"/athlete/{INTERVALS_ATHLETE_ID}/events",
-        params={"oldest": oldest, "newest": newest},
-    )
-    return JSONResponse(content=data)
 """
 
 @app.get(
