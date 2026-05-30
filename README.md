@@ -1,8 +1,8 @@
 # Intervals.icu MCP HTTP Wrapper
 
-A **FastAPI + MCP** server that exposes Intervals.icu tools to MCP-compatible assistants through a remote URL, with HTTP debug endpoints, endurance-focused analytical tools, and optional API-key protection for `/mcp`.
+A **FastAPI + MCP** server that exposes Intervals.icu tools to MCP-compatible assistants through a remote URL, with HTTP debug endpoints, endurance-focused analytical tools, optional API-key protection for `/mcp`, and full calendar event management.
 
-This project relies on the Intervals.icu Open API, which provides access to activities, wellness data, planned workouts, and other athlete resources through API key or OAuth 2.0 authentication. Automatic exposure of FastAPI endpoints as MCP tools is handled through `fastapi_mcp`, which mounts an MCP HTTP server on a path such as `/mcp`. [intervals](https://www.intervals.icu/features/open-api/)
+This project relies on the Intervals.icu Open API, which provides access to activities, wellness data, planned workouts, calendar events, and other athlete resources through API key or OAuth 2.0 authentication. Automatic exposure of FastAPI endpoints as MCP tools is handled through `fastapi_mcp`, which mounts an MCP HTTP server on a path such as `/mcp`. [intervals](https://www.intervals.icu/features/open-api/)
 
 ## Features
 
@@ -10,6 +10,8 @@ This project relies on the Intervals.icu Open API, which provides access to acti
 - Provides directly usable HTTP routes for debugging and local testing.
 - Centralizes access to Intervals.icu with more structured responses than raw API JSON.
 - Adds endurance-focused analytical tools such as histograms, best efforts, intervals, activity streams, and weekly running volume.
+- Supports **full calendar event management**: create, update, delete, bulk operations, and duplication.
+- Supports **rich activity search** returning complete performance metrics (power, HR, training load, intensity).
 - Supports remote MCP access protection with an HTTP API key.
 
 ## Use cases
@@ -22,6 +24,8 @@ Typical use cases include:
 - Retrieving wellness data and training load / form metrics.
 - Exploring intervals, streams, and best efforts for a given activity.
 - Aggregating running volume by week.
+- Searching activities with full performance details (power, heart rate, TSS, intensity).
+- Planning and managing training calendar events (WORKOUT, NOTE, RACE, GOAL).
 - Giving an AI assistant controlled access to a personal Intervals.icu account.
 
 ## Architecture
@@ -39,32 +43,46 @@ app/
 └── routes/
     ├── activities.py
     ├── athlete.py
+    ├── events.py
     ├── plans.py
     └── wellness.py
 ```
 
 ### Logical organization
 
-- `core/client.py`: HTTP calls to the Intervals.icu API.
+- `core/client.py`: HTTP calls to the Intervals.icu API (`GET`, `POST`, `PUT`, `DELETE`).
 - `core/utils.py`: parsing, filtering, and analysis helpers.
-- `routes/activities.py`: activities, details, local search, calendar events.
+- `routes/activities.py`: activities, details, local search, full search with performance metrics.
 - `routes/athlete.py`: athlete profile and fitness summary.
+- `routes/events.py`: calendar event management (create, update, delete, bulk, duplicate).
 - `routes/plans.py`: planned workouts and filters.
 - `routes/wellness.py`: daily and range wellness endpoints.
 - `wrapper_server.py`: FastAPI assembly, security, and MCP exposure.
 
 ## Exposed tools
 
-The exact list may evolve, but the MCP instance typically exposes the following operations when they are referenced in `FastApiMCP(include_operations=...)`:
+The MCP instance exposes the following operations referenced in `FastApiMCP(include_operations=...)`:
 
-| Domain | Typical tools |
+| Domain | Tools |
 |---|---|
 | Athlete | `get_athlete_profile`, `get_fitness_summary` |
-| Activities | `get_activities`, `get_activity_details`, `search_activities_local` |
+| Activities | `get_activities`, `get_activity_details`, `search_activities_local`, `search_activities_full` |
 | Wellness | `get_wellness`, `get_wellness_for_date` |
 | Plans | `get_plan_workouts_filtered` |
 | Analysis | `get_activity_streams`, `get_activity_intervals`, `get_best_efforts`, `get_best_efforts_debug`, `get_power_histogram`, `get_hr_histogram`, `get_pace_histogram`, `get_running_volume_by_week` |
-| Calendar | `get_events` |
+| Calendar | `get_events`, `create_event`, `update_event`, `delete_event`, `bulk_create_events`, `bulk_delete_events`, `duplicate_event` |
+
+### search_activities_full vs search_activities_local
+
+| | `search_activities_local` | `search_activities_full` |
+|---|---|---|
+| Recherche | Filtre local sur activités récentes | Recherche native Intervals.icu |
+| Données retournées | Résumé minimal (id, name, date, type, distance) | Détails complets (power, HR, TSS, HRSS, TRIMP, intensity, cadence) |
+| Usage recommandé | Recherche rapide par nom | Analyse de performance sur une activité ciblée |
+
+### Événements calendrier
+
+Les événements supportent quatre catégories : `WORKOUT`, `NOTE`, `RACE`, `GOAL`. Les champs `type`, `moving_time`, `distance` et `icu_training_load` s'appliquent principalement aux événements `WORKOUT`.
 
 ## Requirements
 
@@ -204,6 +222,28 @@ curl -i -X POST "https://your-domain.example.com/mcp" \
 
 If authentication is configured correctly, the response should be `200 OK` with a valid JSON-RPC `initialize` payload.
 
+### Créer un événement calendrier
+
+```bash
+curl -X POST "http://localhost:8000/events" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date_local": "2026-06-10",
+    "name": "Sortie longue Z2",
+    "category": "WORKOUT",
+    "type": "Run",
+    "moving_time": 5400,
+    "distance": 15000,
+    "icu_training_load": 80
+  }'
+```
+
+### Recherche d'activités avec détails complets
+
+```bash
+curl "http://localhost:8000/activities/search/full?query=sortie+longue&limit=5"
+```
+
 ## Perplexity integration
 
 Perplexity supports adding remote MCP connectors with connector-side authentication configuration. For this project, the target setup is typically: [perplexity](https://www.perplexity.ai/help-center/en/articles/13915507-adding-custom-remote-connectors)
@@ -224,7 +264,11 @@ Besides `/mcp`, the project generally exposes:
 - `/activities`
 - `/activities/details`
 - `/activities/search`
-- `/events`
+- `/activities/search/full`
+- `/events` — `GET`, `POST`
+- `/events/{id}` — `PUT`, `DELETE`
+- `/events/bulk` — `POST`, `DELETE`
+- `/events/{id}/duplicate` — `POST`
 - `/athlete/profile`
 - `/athlete/fitness`
 - `/wellness`
@@ -244,6 +288,7 @@ eddmann's project provides a rich Intervals.icu MCP server with a strongly MCP-n
 - it uses **FastAPI** to keep endpoints directly testable over HTTP;
 - it uses **FastApiMCP** to expose these endpoints as MCP tools;
 - it favors structured responses tailored to personal running and cycling workflows;
+- it exposes write operations (create, update, delete events) directly as MCP tools;
 - it makes operational debugging easier through explicit HTTP routes.
 
 ## Troubleshooting
